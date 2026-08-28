@@ -383,7 +383,38 @@
     color:var(--muted);
     margin-top:2px;
   }
-  .periodo-label{color:var(--text);}
+  .reg-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 4px;
+    font-size:13px;
+    border-bottom:1px solid #ECEFE6;
+  }
+  .reg-row:last-child{border-bottom:none;}
+  .reg-row .col-dia{flex:1.3;font-weight:600;color:var(--text);}
+  .reg-row .col-saida{flex:1;color:var(--muted);}
+  .reg-row .col-extra{flex:1;text-align:right;font-weight:700;color:var(--muted);}
+  .reg-row.positivo .col-extra{color:var(--primary-dark);}
+  .reg-row.negativo .col-extra{color:var(--danger);}
+
+  .reg-paginacao{
+    display:flex;
+    justify-content:center;
+    gap:6px;
+    margin-top:12px;
+  }
+  .reg-pagina-btn{
+    width:28px;height:28px;
+    border-radius:8px;
+    border:none;
+    background:var(--bg);
+    color:var(--muted);
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .reg-pagina-btn.ativa{background:var(--primary);color:#fff;}
 
   .cal-card{
     background:var(--card);
@@ -736,7 +767,17 @@
         <div class="dh-value" id="registroSaldo">0min</div>
       </div>
 
-      <button class="btn" id="exportarBtn" style="margin-top:24px;">
+      <div class="cal-card" style="margin-top:24px;">
+        <div class="cal-nav">
+          <button id="regPrevPeriod">‹</button>
+          <div class="month" id="regPeriodoLabel">—</div>
+          <button id="regNextPeriod">›</button>
+        </div>
+        <div class="reg-tabela" id="regTabela"></div>
+        <div class="reg-paginacao" id="regPaginacao"></div>
+      </div>
+
+      <button class="btn" id="exportarBtn" style="margin-top:16px;">
         <span class="btn-ico">
           <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path></svg>
         </span>
@@ -1106,26 +1147,81 @@ function confirmarFoto(){
   capturarLocalizacao();
 }
 
-function periodoAtualBounds(){
-  const anchorAtual = hoje.getDate() <= 25
-    ? new Date(hoje.getFullYear(), hoje.getMonth()-1, 1)
-    : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-  return getPeriodBounds(anchorAtual);
-}
+let registroAnchor = hoje.getDate() <= 25
+  ? new Date(hoje.getFullYear(), hoje.getMonth()-1, 1)
+  : new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
-function abrirRegistro(){
-  const { start, end } = periodoAtualBounds();
+const REG_POR_PAGINA = 8;
+let regDadosPeriodo = [];
+let regPaginaAtual = 1;
+
+function renderRegistro(){
+  const { start, end } = getPeriodBounds(registroAnchor);
+  document.getElementById("regPeriodoLabel").textContent = `${fmtCurta(start)} – ${fmtCurta(end)}/${end.getFullYear()}`;
+
   const registros = Store.getAll();
   let totalMin = 0;
+  regDadosPeriodo = [];
   for(let d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
-    const reg = registros[toKey(d)];
-    if(reg) totalMin += reg.extraMin;
+    const date = new Date(d);
+    const reg = registros[toKey(date)];
+    if(!reg) continue;
+    totalMin += reg.extraMin;
+    regDadosPeriodo.push({ date, reg });
   }
+
   const saldoEl = document.getElementById("registroSaldo");
   saldoEl.textContent = formatarExtra(totalMin);
   saldoEl.style.color = totalMin < 0 ? "var(--danger)" : totalMin > 0 ? "var(--primary)" : "";
-  document.getElementById("registroPeriodo").innerHTML =
-    `<span class="periodo-label">Período</span> ${fmtCurta(start)} – ${fmtCurta(end)}/${end.getFullYear()}`;
+
+  document.getElementById("registroPeriodo").textContent =
+    `${DIAS_SEMANA[hoje.getDay()]}, ${String(hoje.getDate()).padStart(2,"0")}/${String(hoje.getMonth()+1).padStart(2,"0")}/${hoje.getFullYear()}`;
+
+  regPaginaAtual = 1;
+  renderPaginaRegistro();
+}
+
+function renderPaginaRegistro(){
+  const totalPaginas = Math.max(1, Math.ceil(regDadosPeriodo.length / REG_POR_PAGINA));
+  if(regPaginaAtual > totalPaginas) regPaginaAtual = totalPaginas;
+
+  const inicio = (regPaginaAtual-1) * REG_POR_PAGINA;
+  const fatia = regDadosPeriodo.slice(inicio, inicio + REG_POR_PAGINA);
+
+  const linhasHtml = fatia.map(({ date, reg })=>{
+    const estado = reg.extraMin < 0 ? "negativo" : reg.extraMin > 0 ? "positivo" : "";
+    const diaLabel = `${DIAS_SEMANA_ABR[date.getDay()]} ${String(date.getDate()).padStart(2,"0")}/${String(date.getMonth()+1).padStart(2,"0")}`;
+    return `
+      <div class="reg-row ${estado}">
+        <span class="col-dia">${diaLabel}</span>
+        <span class="col-saida">${reg.saida}</span>
+        <span class="col-extra">${formatarExtra(reg.extraMin)}</span>
+      </div>`;
+  }).join("");
+
+  document.getElementById("regTabela").innerHTML =
+    linhasHtml || `<div class="empty-msg">Sem registros neste período.</div>`;
+
+  const pagBox = document.getElementById("regPaginacao");
+  if(totalPaginas <= 1){
+    pagBox.innerHTML = "";
+  } else {
+    let botoes = "";
+    for(let p=1; p<=totalPaginas; p++){
+      botoes += `<button type="button" class="reg-pagina-btn ${p===regPaginaAtual?'ativa':''}" data-pagina="${p}">${p}</button>`;
+    }
+    pagBox.innerHTML = botoes;
+    pagBox.querySelectorAll(".reg-pagina-btn").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        regPaginaAtual = Number(btn.dataset.pagina);
+        renderPaginaRegistro();
+      });
+    });
+  }
+}
+
+function abrirRegistro(){
+  renderRegistro();
   document.getElementById("registroScreen").classList.add("show");
   document.getElementById("registroOverlay").classList.add("show");
 }
@@ -1136,6 +1232,14 @@ function fecharRegistro(){
 document.getElementById("btnRegistro").addEventListener("click", abrirRegistro);
 document.getElementById("closeRegistro").addEventListener("click", fecharRegistro);
 document.getElementById("registroOverlay").addEventListener("click", fecharRegistro);
+document.getElementById("regPrevPeriod").addEventListener("click", ()=>{
+  registroAnchor.setMonth(registroAnchor.getMonth()-1);
+  renderRegistro();
+});
+document.getElementById("regNextPeriod").addEventListener("click", ()=>{
+  registroAnchor.setMonth(registroAnchor.getMonth()+1);
+  renderRegistro();
+});
 
 document.getElementById("btnCamera").addEventListener("click", abrirCamera);
 document.getElementById("camCancelar").addEventListener("click", fecharCamera);
@@ -1420,7 +1524,7 @@ function mostrarDetalhe(key, date){
 document.getElementById("exportarBtn").addEventListener("click", exportarPlanilha);
 
 function exportarPlanilha(){
-  const { start, end } = periodoAtualBounds();
+  const { start, end } = getPeriodBounds(registroAnchor);
   const registros = Store.getAll();
   const linhas = [["Dia","Horário Ponto","Horário Saída","Tempo Extra"]];
 
